@@ -3,6 +3,7 @@ use crate::peer::{PeerHandle, PeerInfo};
 use anyhow::bail;
 use std::net::SocketAddr;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
@@ -19,10 +20,12 @@ pub(crate) struct Server {
     to_peer_disconnected: mpsc::Sender<SocketAddr>,
     /// Channel to receive notification when peer disconnected
     rcv_peer_disconnected: mpsc::Receiver<SocketAddr>,
+    /// Current Runtime
+    runtime_handle: Handle,
 }
 
 impl Server {
-    pub(crate) fn new(address: &str) -> anyhow::Result<Self> {
+    pub(crate) fn new(address: &str, runtime_handle: Handle) -> anyhow::Result<Self> {
         let address = address.parse()?;
         let (to_server, from_peers) = mpsc::channel(32);
         let (to_peer_disconnected, rcv_peer_disconnected) = mpsc::channel(32);
@@ -33,6 +36,7 @@ impl Server {
             from_peers,
             to_peer_disconnected,
             rcv_peer_disconnected,
+            runtime_handle,
         })
     }
 
@@ -153,7 +157,7 @@ impl Server {
     /// Starts new task to communicate with the peer.
     fn spawn_peer_listener(&self, peer: PeerHandle) {
         let send_disconnect = self.to_peer_disconnected.clone();
-        tokio::spawn(async move {
+        self.runtime_handle.spawn(async move {
             let peer_address = peer.stream.peer_addr().unwrap();
             if let Err(e) = peer.listen_messages().await {
                 info!(?peer_address, "Peer error: {e:?}");

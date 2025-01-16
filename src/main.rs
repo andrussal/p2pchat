@@ -1,9 +1,13 @@
 mod messages;
+mod overwatch;
 mod peer;
 mod server;
 
-use crate::server::Server;
 use clap::Parser;
+use overwatch::services::{ServerService, ServerSettings};
+use overwatch_derive::Services;
+use overwatch_rs::overwatch::OverwatchRunner;
+use overwatch_rs::services::handle::ServiceHandle;
 
 #[derive(Parser)]
 struct Args {
@@ -11,8 +15,12 @@ struct Args {
     known_peer: Option<String>,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+#[derive(Services)]
+pub(crate) struct P2pChat {
+    peers: ServiceHandle<ServerService>,
+}
+
+fn main() -> anyhow::Result<()> {
     let subscriber = tracing_subscriber::fmt()
         .compact()
         .with_file(true)
@@ -22,16 +30,16 @@ async fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let args = Args::parse();
-    tracing::info!("Starting server on: {}", args.address);
 
-    let mut server = Server::new(&args.address)?;
+    let settings = P2pChatServiceSettings {
+        peers: ServerSettings {
+            address: args.address,
+            known_peer: args.known_peer,
+        },
+    };
 
-    if let Some(known_peer) = args.known_peer {
-        let known_peer = known_peer.parse()?;
-        server.bootstrap_from_known_peer(known_peer).await?;
-    }
-
-    server.listen(&args.address).await?;
+    let p2p_chat = OverwatchRunner::<P2pChat>::run(settings, None).expect("OverwatchRunner failed");
+    p2p_chat.wait_finished();
 
     Ok(())
 }
